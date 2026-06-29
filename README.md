@@ -5,17 +5,14 @@ Automated setup and deployment tool for YouGile project management, built on Doc
 ## Requirements
 
 **Required components:**
-
 - Docker 20.10 or later
 - Docker Compose 2.0 or later
 
 **Server resources:**
-
 - 2 GB RAM minimum (4 GB recommended)
 - 5 GB free disk space minimum
 
 **Supported operating systems:**
-
 - Linux (Ubuntu, Debian, CentOS, RHEL, Fedora, and others)
 - macOS
 - Windows (with WSL2)
@@ -79,7 +76,6 @@ See [Configuration via .env](#configuration-via-env) for a full description of a
 ```
 
 The installer automatically:
-
 1. Creates the directory structure
 2. Generates configuration files (`conf.json`, `nginx.conf`, `license.key`)
 3. Creates Docker files (`Dockerfile`, `docker-compose.yml`, `.dockerignore`)
@@ -107,11 +103,11 @@ http://localhost:8001     # with NGINX_ENABLED=false
 
 By default, **all existing files are preserved**. Re-running `./yougile-container install` is safe — it only creates what is missing:
 
-| File                                                | Default behavior     |
-| --------------------------------------------------- | -------------------- |
-| `conf.json`, `nginx.conf`, `license.key`            | Preserved (`[SKIP]`) |
+| File | Default behavior |
+|------|-----------------|
+| `conf.json`, `nginx.conf`, `license.key` | Preserved (`[SKIP]`) |
 | `Dockerfile`, `docker-compose.yml`, `.dockerignore` | Preserved (`[SKIP]`) |
-| `yougile.tar.gz`                                    | Preserved (`[SKIP]`) |
+| `yougile.tar.gz` | Preserved (`[SKIP]`) |
 
 To force regeneration of all files (for example, after changing `.env`):
 
@@ -239,22 +235,29 @@ After any `.env` change, regenerate the configuration:
 ├── docker-compose.yml         # container orchestration
 ├── entrypoint.sh              # Docker entrypoint (privilege drop via gosu)
 ├── .dockerignore              # Docker build context exclusions
-├── yougile/                   # YouGile application data
+├── yougile/                   # config bind-mount (→ /opt/yougile-config inside container)
 │   ├── conf.json              # application configuration
-│   ├── license.key            # license key
-│   ├── logs/                  # application logs
-│   ├── user-data/             # user-uploaded files
-│   ├── database/              # database files
-│   └── extensions/            # extensions
+│   └── license.key            # license key
 ├── nginx/                     # Nginx configuration
 │   ├── nginx.conf             # main configuration file
 │   ├── conf.d/                # additional configuration snippets
-│   └── logs/                  # Nginx logs
+│   └── logs/                  # Nginx logs (bind mount → /var/log/nginx)
 └── certbot/                   # SSL certificate management
     ├── www/                   # ACME challenge directory
     ├── conf/                  # certificates and Certbot configuration
     └── README.md              # SSL setup instructions
 ```
+
+YouGile application data lives in named Docker volumes (not on the host filesystem directly):
+
+| Volume | Mounted at | Contents |
+|--------|------------|----------|
+| `yougile_database` | `/opt/yougile/database` | Database files |
+| `yougile_userdata` | `/opt/yougile/user-data` | User-uploaded files |
+| `yougile_logs` | `/opt/yougile/logs` | Application logs |
+| `yougile_extensions` | `/opt/yougile/extensions` | Extensions |
+
+To read logs directly: `docker compose logs -f yougile`. To inspect or export volume contents, see [Backup](#backup).
 
 ---
 
@@ -374,7 +377,6 @@ openssl s_client -connect your-domain.com:443 -servername your-domain.com
 > **Important:** the `yougile` container must be running — the command checks for updates via `docker exec`. If the container is stopped, start it first with `docker compose up -d`.
 
 What the command does:
-
 - Checks for available updates (via the running container)
 - Stops the containers
 - Downloads the new `yougile.tar.gz`
@@ -428,12 +430,12 @@ docker compose exec yougile ./server task
 
 YouGile stores all persistent data in named Docker volumes, which survive `docker compose down` and installer re-runs.
 
-| Volume               | Contents            |
-| -------------------- | ------------------- |
-| `yougile_database`   | Database files      |
-| `yougile_userdata`   | User-uploaded files |
-| `yougile_logs`       | System logs         |
-| `yougile_extensions` | Extensions          |
+| Volume | Contents |
+|--------|----------|
+| `yougile_database` | Database files |
+| `yougile_userdata` | User-uploaded files |
+| `yougile_logs` | System logs |
+| `yougile_extensions` | Extensions |
 
 ### Backup
 
@@ -505,10 +507,10 @@ docker compose up -d
 
 The following hardening measures are applied automatically to the generated `docker-compose.yml` and `Dockerfile`:
 
-| Container | Measures                                                                                                                                                                |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Container | Measures |
+|-----------|----------|
 | `yougile` | `security_opt: no-new-privileges:true`, `cap_drop: ALL`, `cap_add: [CHOWN, SETUID, SETGID]`; the entrypoint drops privileges via `gosu node` before starting the server |
-| `nginx`   | `security_opt: no-new-privileges:true`, `cap_drop: ALL`, `cap_add: [NET_BIND_SERVICE]`; config files and certificates are mounted read-only (`:ro`)                     |
+| `nginx` | `security_opt: no-new-privileges:true`, `cap_drop: ALL`, `cap_add: [NET_BIND_SERVICE]`; config files and certificates are mounted read-only (`:ro`) |
 
 The `yougile` container starts as root (required to `chown` volume directories and create config symlinks), after which `entrypoint.sh` immediately executes `exec gosu node "$@"` — the server runs as uid 1000 with no privilege escalation path.
 
