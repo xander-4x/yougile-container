@@ -24,7 +24,7 @@ func initLang() {
 		langEn = false
 	case "en":
 		langEn = true
-	// default: leave langEn = true (English)
+		// default: leave langEn = true (English)
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 )
@@ -85,13 +86,13 @@ func validateDirectories(directories []string) error {
 func checkFileExists(path string) error {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		return fmt.Errorf(tr("файл не существует", "file does not exist"))
+		return errors.New(tr("файл не существует", "file does not exist"))
 	}
 	if err != nil {
 		return fmt.Errorf(tr("ошибка доступа к файлу: %v", "error accessing file: %v"), err)
 	}
 	if info.IsDir() {
-		return fmt.Errorf(tr("ожидался файл, но найден каталог", "expected a file but found a directory"))
+		return errors.New(tr("ожидался файл, но найден каталог", "expected a file but found a directory"))
 	}
 	return nil
 }
@@ -99,13 +100,13 @@ func checkFileExists(path string) error {
 func checkDirectoryExists(path string) error {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		return fmt.Errorf(tr("каталог не существует", "directory does not exist"))
+		return errors.New(tr("каталог не существует", "directory does not exist"))
 	}
 	if err != nil {
 		return fmt.Errorf(tr("ошибка доступа к каталогу: %v", "error accessing directory: %v"), err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf(tr("ожидался каталог, но найден файл", "expected a directory but found a file"))
+		return errors.New(tr("ожидался каталог, но найден файл", "expected a directory but found a file"))
 	}
 	return nil
 }

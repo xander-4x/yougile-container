@@ -41,18 +41,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && gosu nobody true
 
-COPY yougile.tar.gz /
-RUN tar xzf /yougile.tar.gz -C /opt && rm /yougile.tar.gz
-
-EXPOSE 8001
+%s
+ADD --chown=node:node yougile.tar.gz /opt/
 
 WORKDIR /opt/yougile
 
-RUN npm install
-
 %s
 RUN mkdir -p database logs user-data extensions \
-    && chown -R node:node /opt/yougile
+    && chown node:node database logs user-data extensions
+
+EXPOSE 8001
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
@@ -61,7 +59,8 @@ ENTRYPOINT ["/entrypoint.sh"]
 CMD ["./server"]`,
 		nodeImage(),
 		"# Install gosu for privilege dropping in entrypoint",
-		"# Create directories and transfer ownership to node user",
+		"# Extract the archive with node ownership. Dependencies (node_modules)\n# are vendored inside the archive — no npm install is needed.",
+		"# Create volume mount points owned by the node user",
 	)
 	return writeFile("Dockerfile", content)
 }
@@ -83,12 +82,11 @@ ln -sf /opt/yougile-config/license.key /opt/yougile/license.key
 mkdir -p /opt/yougile/database/companies
 mkdir -p /opt/yougile/database/user-events
 
-# Transfer volume ownership to node user before dropping privileges
-chown -R node:node \
-  /opt/yougile/database \
-  /opt/yougile/user-data \
-  /opt/yougile/logs \
-  /opt/yougile/extensions || true
+# Fix volume ownership before dropping privileges. Only touches files
+# not already owned by node, so restarts don't rewrite the whole tree.
+find /opt/yougile/database /opt/yougile/user-data \
+     /opt/yougile/logs /opt/yougile/extensions \
+  ! -user node -exec chown node:node {} + || true
 
 # Drop to non-root and exec
 exec gosu node "$@"
@@ -158,6 +156,9 @@ func yougileServiceSection() string {
 	b.WriteString("      - ALL\n")
 	b.WriteString("    cap_add:\n")
 	b.WriteString("      - CHOWN\n")
+	// DAC_OVERRIDE: the image tree is owned by node (ADD --chown), so the
+	// root entrypoint needs it to manage files in node-owned directories.
+	b.WriteString("      - DAC_OVERRIDE\n")
 	b.WriteString("      - SETUID\n")
 	b.WriteString("      - SETGID\n")
 	b.WriteString("    security_opt:\n")
@@ -172,7 +173,6 @@ func nginxServiceSection() string {
 	var b strings.Builder
 	b.WriteString("  nginx:\n")
 	b.WriteString("    image: " + nginxImage() + "\n")
-	b.WriteString("    container_name: nginx\n")
 	b.WriteString("    ports:\n")
 	b.WriteString("      - \"" + nginxHTTPPort() + ":80\"\n")
 	b.WriteString("      - \"" + nginxHTTPSPort() + ":443\"\n")
@@ -183,6 +183,9 @@ func nginxServiceSection() string {
 	b.WriteString("      - ./certbot/www:/var/www/certbot:ro\n")
 	b.WriteString("      - ./certbot/conf:/etc/nginx/ssl:ro\n")
 	b.WriteString("      - ./nginx/logs:/var/log/nginx:rw\n")
+	b.WriteString("      # Read-only user-data for direct file serving (see the\n")
+	b.WriteString("      # /user-data/ block in nginx.conf)\n")
+	b.WriteString("      - yougile_userdata:/opt/yougile/user-data:ro\n")
 	b.WriteString("    cap_drop:\n")
 	b.WriteString("      - ALL\n")
 	b.WriteString("    cap_add:\n")
@@ -202,7 +205,6 @@ func certbotServiceSection() string {
 	b.WriteString("  # Certbot — certificate management only (run via: docker compose run --rm certbot)\n")
 	b.WriteString("  certbot:\n")
 	b.WriteString("    image: " + certbotImage() + "\n")
-	b.WriteString("    container_name: certbot\n")
 	b.WriteString("    volumes:\n")
 	b.WriteString("      - ./certbot/www:/var/www/certbot:rw\n")
 	b.WriteString("      - ./certbot/conf:/etc/letsencrypt:rw\n")
@@ -235,73 +237,12 @@ func createDockerIgnore() error {
 		fmt.Println("    [SKIP] " + tr("Файл уже существует, пропускаем", "File already exists, skipping"))
 		return nil
 	}
-	content := fmt.Sprintf(`%s
-.git
-.gitignore
-*.md
-README.md
-CHANGELOG.md
-LICENSE
-
-%s
-.env
-.env.local
-.env.*.local
-
-%s
-*.log
-logs/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-%s
-node_modules/
-.npm
-.yarn-integrity
-
-%s
-.tmp/
-.cache/
-*.tmp
-*.temp
-
-%s
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-%s
-.DS_Store
-Thumbs.db
-
-%s
-yougile/
-nginx/
-certbot/
-
-%s
-docker-compose.yml
-docker-compose.*.yml
-Dockerfile*
-.dockerignore
-
-%s
-*.go
-go.mod
-go.sum`,
-		"# Exclude unnecessary files from Docker build context",
-		"# Local configuration files",
-		"# Logs",
-		"# Dependency cache",
-		"# Temporary files",
-		"# IDE files",
-		"# OS files",
-		"# Project directories (mounted as volumes)",
-		"# Docker files",
-		"# Deployment files",
-	)
+	// Whitelist approach: the image build only needs the archive and the
+	// entrypoint, so exclude everything else (including .env with secrets
+	// and the installer binary).
+	content := `# Exclude everything from the build context except what the image needs
+*
+!yougile.tar.gz
+!entrypoint.sh`
 	return writeFile(".dockerignore", content)
 }

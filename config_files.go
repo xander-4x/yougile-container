@@ -28,8 +28,10 @@ func CreateConfigurationFiles() error {
 }
 
 // createYougileConfig writes the YouGile application config to ./yougile/conf.json.
+// Never overwrites an existing file (it holds user edits such as SMTP
+// credentials), even with --regen. Dry-run always previews the template.
 func createYougileConfig() error {
-	if fileExists("./yougile/conf.json") {
+	if !dryRun && fileExists("./yougile/conf.json") {
 		fmt.Println("    [SKIP] " + tr("Файл уже существует, пропускаем", "File already exists, skipping"))
 		return nil
 	}
@@ -88,8 +90,10 @@ func createYougileConfig() error {
 }
 
 // createNginxConfig writes the Nginx reverse proxy config to ./nginx/nginx.conf.
+// Never overwrites an existing file (it holds user edits such as SSL paths),
+// even with --regen. Dry-run always previews the template.
 func createNginxConfig() error {
-	if fileExists("./nginx/nginx.conf") {
+	if !dryRun && fileExists("./nginx/nginx.conf") {
 		fmt.Println("    [SKIP] " + tr("Файл уже существует, пропускаем", "File already exists, skipping"))
 		return nil
 	}
@@ -115,7 +119,32 @@ http {
     server {
         listen 80;
         # server_name <YOUR_SERVER_NAME>;
-        return 301 https://$server_name$request_uri;
+
+        client_max_body_size 50M;
+        client_body_buffer_size 50M;
+
+        # ACME challenge for Let's Encrypt (certbot webroot)
+        location /.well-known/acme-challenge/ {
+            root /var/www/certbot;
+        }
+
+        # Plain HTTP proxy to YouGile. After enabling the HTTPS server
+        # block below, replace this location with a redirect:
+        #     location / { return 301 https://$host$request_uri; }
+        location / {
+            proxy_pass http://yougile:8001;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header Host $http_host;
+            proxy_read_timeout 1h;
+            proxy_connect_timeout 1h;
+            proxy_send_timeout 1h;
+            proxy_pass_header Server;
+            proxy_max_temp_file_size 0;
+        }
     }
 
 #     server {
@@ -150,6 +179,8 @@ http {
 #         add_header X-Content-Type-Options nosniff;
 
 # # Remove this block if you use the restrictUserDataAccess parameter
+# # (user-data files are served directly by nginx from the read-only
+# # yougile_userdata volume mount; @local-data proxies cache misses to YouGile)
 #         location /user-data/ {
 #             add_header X-YouGile-Served data;
 #             add_header 'Content-Disposition' 'attachment';
@@ -163,6 +194,15 @@ http {
 #             root /opt/yougile;
 #             try_files $uri @local-data;
 #         }
+
+#         location @local-data {
+#             proxy_pass http://yougile:8001;
+#             proxy_http_version 1.1;
+#             proxy_set_header X-Real-IP $remote_addr;
+#             proxy_set_header X-Forwarded-For $remote_addr;
+#             proxy_set_header Host $http_host;
+#             proxy_pass_header Server;
+#         }
 # # End of block to remove
 
 #         location ~ /\. {
@@ -170,7 +210,7 @@ http {
 #         }
 
 #         location / {
-#             proxy_pass http://localhost:8001;
+#             proxy_pass http://yougile:8001;
 #             proxy_http_version 1.1;
 #             proxy_set_header Upgrade $http_upgrade;
 #             proxy_set_header Connection "upgrade";
@@ -191,7 +231,7 @@ http {
 
 // createDemoLicense writes the demo license key to ./yougile/license.key.
 func createDemoLicense() error {
-	if fileExists("./yougile/license.key") {
+	if !dryRun && fileExists("./yougile/license.key") {
 		fmt.Println("    [SKIP] " + tr("Файл уже существует, пропускаем", "File already exists, skipping"))
 		return nil
 	}
@@ -199,7 +239,7 @@ func createDemoLicense() error {
 	return writeFile("./yougile/license.key", "demo-platform-license")
 }
 
-// fileExists reports whether path exists and is not a directory.
+// fileExists reports whether path exists (file or directory).
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

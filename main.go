@@ -24,6 +24,11 @@ func main() {
 	case "install":
 		handleInstall()
 	case "update":
+		if dryRun {
+			fmt.Fprintln(os.Stderr, tr("Флаг --dry-run поддерживается только командой install",
+				"--dry-run is only supported with the install command"))
+			os.Exit(1)
+		}
 		if err := handleUpdate(); err != nil {
 			fmt.Printf("[ERROR] "+tr("Ошибка обновления: %v\n", "Update failed: %v\n"), err)
 			os.Exit(1)
@@ -138,8 +143,8 @@ func filterArgs(args []string) []string {
 	skip := map[string]bool{
 		"--lang=en": true, "--en": true,
 		"--lang=ru": true, "--ru": true,
-		"--regen":    true,
-		"--dry-run":  true,
+		"--regen":   true,
+		"--dry-run": true,
 	}
 	result := make([]string, 0, len(args))
 	for _, arg := range args {
@@ -151,20 +156,25 @@ func filterArgs(args []string) []string {
 }
 
 func runDockerCompose() error {
-	cmd := exec.Command(containerRuntime(), "compose", "up", "-d", "--build")
+	// --remove-orphans cleans up containers of services removed from the
+	// compose file (e.g. nginx/certbot after switching NGINX_ENABLED=false).
+	cmd := exec.Command(containerRuntime(), "compose", "up", "-d", "--build", "--remove-orphans")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("UID=%d", os.Getuid()),
-		fmt.Sprintf("GID=%d", os.Getgid()),
-	)
 	return cmd.Run()
 }
 
 func printSuccessMessage() {
+	url := "http://localhost"
+	if !nginxEnabled() {
+		url = "http://localhost:8001"
+	} else if p := nginxHTTPPort(); p != "80" {
+		url = "http://localhost:" + p
+	}
+
 	fmt.Println("\n[SUCCESS] " + tr("Проект YouGile успешно инициализирован!", "YouGile project successfully initialized!"))
 	fmt.Println("\n" + tr("Полезная информация:", "Useful information:"))
-	fmt.Println("   " + tr("YouGile доступен по адресу:", "YouGile is available at:") + " http://localhost")
+	fmt.Println("   " + tr("YouGile доступен по адресу:", "YouGile is available at:") + " " + url)
 	fmt.Println("   " + tr("Настройте SMTP в файле", "Configure SMTP in") + " ./yougile/conf.json")
 	fmt.Println("   " + tr("Для получения SSL сертификата выполните:", "To obtain an SSL certificate run:"))
 	fmt.Println("      docker compose run --rm certbot certonly --webroot -w /var/www/certbot \\")
@@ -223,7 +233,9 @@ func handleUpdate() error {
 }
 
 func checkForUpdates() (bool, error) {
-	cmd := exec.Command(containerRuntime(), "exec", "yougile", "./server", "task", "show-updates")
+	// compose exec resolves the service by name, so this keeps working
+	// even if container_name is changed or removed in the compose file.
+	cmd := exec.Command(containerRuntime(), "compose", "exec", "-T", "yougile", "./server", "task", "show-updates")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf(tr("ошибка выполнения команды проверки обновлений: %v", "failed to run update check command: %v"), err)

@@ -67,7 +67,7 @@ func loadDotEnv() {
 			val = val[1 : len(val)-1]
 		}
 		// shell env takes precedence over .env file
-		if os.Getenv(key) == "" {
+		if _, exists := os.LookupEnv(key); !exists {
 			os.Setenv(key, val)
 		}
 	}

@@ -103,17 +103,19 @@ http://localhost:8001     # with NGINX_ENABLED=false
 
 By default, **all existing files are preserved**. Re-running `./yougile-container install` is safe — it only creates what is missing:
 
-| File | Default behavior |
-|------|-----------------|
-| `conf.json`, `nginx.conf`, `license.key` | Preserved (`[SKIP]`) |
-| `Dockerfile`, `docker-compose.yml`, `.dockerignore` | Preserved (`[SKIP]`) |
-| `yougile.tar.gz` | Preserved (`[SKIP]`) |
+| File | Default | With `--regen` |
+|------|---------|----------------|
+| `conf.json`, `nginx.conf`, `license.key` | Preserved | **Preserved** (they hold your edits: SMTP, SSL paths) |
+| `Dockerfile`, `entrypoint.sh`, `docker-compose.yml`, `.dockerignore` | Preserved | Regenerated from templates |
+| `yougile.tar.gz` | Preserved | Preserved (re-downloaded by `update`) |
 
-To force regeneration of all files (for example, after changing `.env`):
+To regenerate the Docker files from templates (for example, after changing `.env`):
 
 ```bash
 ./yougile-container install --regen
 ```
+
+To reset `conf.json` or `nginx.conf` to the stock template, delete the file and re-run the installer.
 
 ### Dry run (preview without writing)
 
@@ -322,6 +324,14 @@ ssl_certificate /etc/nginx/ssl/live/your-domain.com/fullchain.pem;
 ssl_certificate_key /etc/nginx/ssl/live/your-domain.com/privkey.pem;
 ```
 
+Then switch the HTTP server block from proxying to redirecting — replace its `location /` block with:
+
+```nginx
+location / { return 301 https://$host$request_uri; }
+```
+
+(keep the `/.well-known/acme-challenge/` location — it is needed for certificate renewal)
+
 **Step 4: Validate and restart**
 
 ```bash
@@ -509,7 +519,7 @@ The following hardening measures are applied automatically to the generated `doc
 
 | Container | Measures |
 |-----------|----------|
-| `yougile` | `security_opt: no-new-privileges:true`, `cap_drop: ALL`, `cap_add: [CHOWN, SETUID, SETGID]`; the entrypoint drops privileges via `gosu node` before starting the server |
+| `yougile` | `security_opt: no-new-privileges:true`, `cap_drop: ALL`, `cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID]`; the entrypoint drops privileges via `gosu node` before starting the server |
 | `nginx` | `security_opt: no-new-privileges:true`, `cap_drop: ALL`, `cap_add: [NET_BIND_SERVICE]`; config files and certificates are mounted read-only (`:ro`) |
 
 The `yougile` container starts as root (required to `chown` volume directories and create config symlinks), after which `entrypoint.sh` immediately executes `exec gosu node "$@"` — the server runs as uid 1000 with no privilege escalation path.
@@ -557,7 +567,7 @@ docker compose logs --tail 100 yougile
 ```bash
 docker compose exec nginx nginx -t          # validate configuration
 docker compose exec nginx nginx -s reload   # reload config without restart
-docker compose exec nginx curl -v http://yougile:8001  # test backend connectivity
+docker compose exec nginx wget -qO- http://yougile:8001  # test backend connectivity
 ```
 
 ### Full rebuild
