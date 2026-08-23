@@ -605,3 +605,9 @@ tar -czf support-$(date +%Y%m%d-%H%M%S).tar.gz debug.txt \
 - [Docker Compose Reference](https://docs.docker.com/compose/)
 - [Nginx Configuration Guide](https://nginx.org/en/docs/)
 - [SSL Configuration Generator](https://ssl-config.mozilla.org/)
+
+---
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
