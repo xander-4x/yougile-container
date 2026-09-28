@@ -405,6 +405,33 @@ To also regenerate Docker files from templates (for example, after changing `.en
 ./yougile-container update --regen
 ```
 
+### Extension updates
+
+The `yougile_extensions` volume is writable and persists across updates. Docker
+only populates an empty volume from the image; rebuilding the image does not
+refresh an existing volume automatically.
+
+The image keeps a separate copy of its bundled extensions. Before each server
+start, `entrypoint.sh` copies these into the volume, replacing matching files and
+preserving additional files (including custom extensions). Local edits to bundled
+files are overwritten on startup. Files removed from a newer release are retained
+in the volume; this is a merge, not an exact mirror. A copy failure prevents the
+server from starting.
+
+To apply this fix to an existing installation, build the updated installer and
+run the following in your deployment directory:
+
+```bash
+./yougile-container install --regen
+```
+
+This regenerates the Docker files and rebuilds/recreates the containers using the
+existing archive, even if YouGile is already up to date. Back up customized Docker
+files before regenerating them. Application configuration and named volumes are
+preserved. If a newer YouGile release is available, `update --regen` can apply the
+fix and download that release together; it exits without regenerating files when
+no update is available. Subsequent ordinary `update` runs use the fixed templates.
+
 ---
 
 ## Container Management

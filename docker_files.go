@@ -50,6 +50,10 @@ WORKDIR /opt/yougile
 RUN mkdir -p database logs user-data extensions \
     && chown node:node database logs user-data extensions
 
+# Keep bundled extensions outside the volume so upgrades can refresh it.
+RUN mkdir -p /opt/yougile-bundled-extensions \
+    && cp -a extensions/. /opt/yougile-bundled-extensions/
+
 EXPOSE 8001
 
 COPY entrypoint.sh /entrypoint.sh
@@ -81,6 +85,11 @@ ln -sf /opt/yougile-config/license.key /opt/yougile/license.key
 # Ensure required subdirs exist in volumes
 mkdir -p /opt/yougile/database/companies
 mkdir -p /opt/yougile/database/user-events
+
+# Refresh bundled extensions before starting the server. Additional files in
+# the volume are preserved; matching bundled files are replaced on every start.
+mkdir -p /opt/yougile/extensions
+cp -R --remove-destination /opt/yougile-bundled-extensions/. /opt/yougile/extensions/
 
 # Fix volume ownership before dropping privileges. Only touches files
 # not already owned by node, so restarts don't rewrite the whole tree.
